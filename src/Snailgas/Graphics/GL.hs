@@ -1,4 +1,4 @@
-module Graphics where
+module Snailgas.Graphics.GL where
 
 import SDL hiding (glBindTexture)
 import Foreign (Storable, Ptr, alloca, peek, allocaArray, pokeArray, sizeOf, poke)
@@ -118,22 +118,21 @@ attribLoc program str = do withCString str (glGetAttribLocation program) >>= ret
 uniformLoc :: GLuint -> String -> IO GLuint
 uniformLoc program str = do withCString str (glGetUniformLocation program) >>= return . fromIntegral
 
+createTex dimx dimy ptr = do
+   tex <- withNewPtr (glGenTextures 1)
+   glBindTexture GL_TEXTURE_2D tex
+   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_S (fromIntegral GL_REPEAT)
+   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_T (fromIntegral GL_REPEAT)
+   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER (fromIntegral GL_LINEAR)
+   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER (fromIntegral GL_LINEAR)
+   glTexImage2D GL_TEXTURE_2D 0 (fromIntegral GL_RGBA8) dimx dimy 0 GL_RGBA GL_UNSIGNED_BYTE ptr
+   return tex
+
 -- | Load a texture from a file
 loadTexture :: String -> IO GLuint
 loadTexture filename = do
   -- Load image
   eitherImgErr <- readImage filename
-
-  -- function for creating a new texture and copying the data from a ptr
-  let createTex dimx dimy ptr = do
-       tex <- withNewPtr (glGenTextures 1)
-       glBindTexture GL_TEXTURE_2D tex
-       glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_S (fromIntegral GL_REPEAT)
-       glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_T (fromIntegral GL_REPEAT)
-       glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER (fromIntegral GL_LINEAR)
-       glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER (fromIntegral GL_LINEAR)
-       glTexImage2D GL_TEXTURE_2D 0 (fromIntegral GL_RGBA8) dimx dimy 0 GL_RGBA GL_UNSIGNED_BYTE ptr
-       return tex
 
   case eitherImgErr of
        -- upload image to gpu texture
