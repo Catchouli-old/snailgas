@@ -1,6 +1,6 @@
 module Main where
 
-import Lib
+import Snailgas
 
 main :: IO ()
-main = someFunc
+main = runGame
