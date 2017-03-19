@@ -11,7 +11,7 @@ import Foreign (Storable, Ptr, alloca, peek, allocaArray, pokeArray, sizeOf, pok
 import Foreign.Ptr (nullPtr, plusPtr)
 import Foreign.C.String (withCString, peekCString)
 import Foreign.C.Types (CFloat(..), CUInt(..))
-import Control.Monad (unless)
+import Control.Monad (unless, foldM)
 import Graphics.GL.Core33
 import Snailgas.Graphics;
 import qualified Snailgas.Graphics.GL as GL
@@ -28,6 +28,7 @@ runGame = do
   let windowDesc = defaultWindow { windowOpenGL = Just defaultOpenGL }
   window <- createWindow "My little window" windowDesc
   renderer <- createRenderer window (-1) defaultRenderer
+  initialiseGraphics
   loop <- gameLoop window renderer
   loop
   destroyRenderer renderer
@@ -40,7 +41,18 @@ runGame = do
 gameLoop :: Window -> Renderer -> IO (IO ())
 gameLoop window renderer = do
   tex <- loadTexture "data/tex.gif"
-  atlas <- loadTextureA "data/tex.gif" =<< createAtlas 1024 1024
+  --atlas <- loadTextureA "data/tex.gif" =<< createAtlas 1024 1024
+  emptyAtlas <- createAtlas 1024 1024
+  atlas <- foldM loadTextureA emptyAtlas ["data/tex.gif",
+                                          "data/tex1.gif",
+                                          --"data/tex2.gif",
+                                          --"data/tex3.gif",
+                                          --"data/tex4.gif",
+                                          --"data/tex5.gif",
+                                          --"data/tex6.gif",
+                                          --"data/tex7.gif",
+                                          --"data/tex8.gif",
+                                          "data/tex9.gif"]
 
   let loop = do
         events <- pollEvents
