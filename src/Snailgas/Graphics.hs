@@ -10,7 +10,6 @@ module Snailgas.Graphics
   )
 where
 
-import Debug.Trace
 import Data.List
 import Data.IORef
 import Graphics.GL.Core33
@@ -20,6 +19,7 @@ import Foreign (sizeOf, alloca, poke, allocaArray, pokeArray)
 import Foreign.Ptr (nullPtr, plusPtr)
 import Data.Vector.Storable (unsafeWith)
 import Codec.Picture
+import Data.Maybe (isNothing, isJust)
 import qualified Data.Map.Strict as M
 import qualified Snailgas.Graphics.GL as GL
 
@@ -33,7 +33,14 @@ data Atlas = Atlas { atlas_tex_id :: GLuint
                    , atlas_width :: Int
                    , atlas_height :: Int
                    , atlas_texture_entries :: M.Map String (Float, Float, Float, Float)
+                   , atlas_binary_tree :: AtlasNode
                    }
+
+
+data AtlasNode = AtlasNode { node_children :: Maybe (AtlasNode, AtlasNode)
+                           , node_rect :: (Int, Int, Int, Int)
+                           , node_image :: Maybe String
+                           } deriving Show
 
 
 loadTexture :: String -> IO (Texture)
@@ -58,7 +65,7 @@ spriteShader = unsafePerformIO $ newIORef undefined
 
 initialiseGraphics :: IO ()
 initialiseGraphics = do
-  shader <- GL.loadShaderProgram "data/sprite.vert" "data/sprite.frag"
+  shader <- GL.loadShaderProgram "data/shaders/sprite.vert" "data/shaders/sprite.frag"
   writeIORef spriteShader shader
   writeIORef atlastex =<< createTexture (fromIntegral 0) (0, 1, 1, 0)
 
@@ -106,27 +113,48 @@ createAtlas width height = do
   texid <- allocaArray (width*height) $ \ptr -> do
               pokeArray ptr $ replicate (width*height) (0xFFFF00FF :: CUInt)
               GL.createTex (fromIntegral width) (fromIntegral height) ptr
-  return $ Atlas texid width height M.empty
+  let root = AtlasNode Nothing (0, 0, width, height) Nothing
+  return $ Atlas texid width height M.empty root
 
 
--- | Finds (dimx, dimy) of free space in the atlas, returning (-1, -1) if there wasn't a big enough block
-findFreeSpace :: Atlas -> (Int, Int) -> Maybe (Int, Int)
-findFreeSpace atlas (dimx, dimy) =
-  let atlasWidth = atlas_width atlas
-      atlasHeight = atlas_height atlas
-      checkCoord (x, y) = let m@(ax0, ay0, ax1, ay1) = (x, y, x + dimx, y + dimy)
-                              overlap = (flip find) (M.toList $ atlas_texture_entries atlas) isOverlapping
-                              isOverlapping (_, (u0, v0, u1, v1)) =
-                                let o@(bx0, by0, bx1, by1) = (round (u0 * fromIntegral atlasWidth),
-                                                            round (v0 * fromIntegral atlasHeight),
-                                                            round (u1 * fromIntegral atlasWidth),
-                                                            round (v1 * fromIntegral atlasHeight))
-                                    overlaps = (ax0 <= bx1+1 && bx0 <= ax1+1 && ay0 <= by1+1 && by0 <= ay1+1)
-                                in overlaps
-                          in case overlap of
-                                  Nothing -> True
-                                  _       -> False
-  in find checkCoord [(x, y) | y <- [0..atlasWidth-1-dimx], x <- [0..atlasHeight-1-dimy]]
+-- | Finds free space in the atlas binary tree, updating it and returning the free coordinates
+-- Returns an unchanged tree and Nothing if there was a large enough block of free space
+findFreeSpace :: AtlasNode -> (Int, Int) -> (AtlasNode, Maybe (Int, Int, Int, Int))
+findFreeSpace tree@(AtlasNode children rect@(x0,y0,x1,y1) image) (dimx, dimy) =
+  case children of
+       Just (childA, childB) ->
+         let (tA, rA) = findFreeSpace childA (dimx, dimy)
+             (tB, rB) = findFreeSpace childB (dimx, dimy)
+         in (if isJust rA
+                  then (tree { node_children = Just (tA, childB) }, rA)
+                  else (tree { node_children = Just (childA, tB) }, rB))
+       Nothing ->
+         let containsImage = isJust image
+             rectW = x1-x0
+             rectH = y1-y0
+             fits = rectW >= dimx && rectH >= dimy
+             fitsExactly = rectW == dimx && rectH == dimy
+         in case image of
+           Just img -> (tree, Nothing)
+           Nothing  ->
+             if not fits
+              then (tree, Nothing)
+              else if fitsExactly
+                    then (tree { node_image = Just "" }, Just rect)
+                    else
+                      let dw = rectW - dimx
+                          dh = rectH - dimy
+                          rectA = if dw > dh
+                                      then (x0, y0, x0+dimx-0, y1)
+                                      else (x0, y0, x1, y0+dimy-0)
+                          rectB = if dw > dh
+                                      then (x0+dimx, y0, x1, y1)
+                                      else (x0, y0+dimy, x1, y1)
+                          childA = AtlasNode Nothing rectA Nothing
+                          childB = AtlasNode Nothing rectB Nothing
+                          (newChildA, res) = findFreeSpace childA (dimx, dimy)
+                          newTree = tree { node_children = Just (newChildA, childB) }
+                      in (newTree, res)
 
 
 loadTextureA :: Atlas -> String-> IO Atlas
@@ -146,16 +174,18 @@ loadTextureA atlas filename = do
           let imgRGBA8 = convertRGBA8 img
           let (dimx, dimy) = (fromIntegral . imageWidth $ imgRGBA8, fromIntegral . imageHeight $ imgRGBA8)
 
-          -- find space in atlas
-          let res = GL.mapTuple fromIntegral <$> findFreeSpace atlas (fromIntegral dimx, fromIntegral dimy)
+          -- Find free space
+          let (updatedTree, space) =
+                findFreeSpace (atlas_binary_tree atlas) (fromIntegral dimx, fromIntegral dimy)
 
-          case res of
+          case space of
                Nothing -> (putStrLn $ "Not enough free space in atlas for texture " ++ filename)
                        >> return atlas
-               Just (x, y) -> unsafeWith (imageData imgRGBA8) $ \ptr -> do
-                    glTexSubImage2D GL_TEXTURE_2D 0 x y dimx dimy GL_RGBA GL_UNSIGNED_BYTE ptr
-                    let newAtlas = atlas { atlas_texture_entries =
+               Just (x, y, _, _) -> unsafeWith (imageData imgRGBA8) $ \ptr -> do
+                    glTexSubImage2D GL_TEXTURE_2D 0 (fromIntegral x) (fromIntegral y) dimx dimy GL_RGBA GL_UNSIGNED_BYTE ptr
+                    let newAtlas = atlas { atlas_binary_tree = updatedTree,
+                                           atlas_texture_entries =
                       M.insert filename ( (fromIntegral x)/atlasWidth, (fromIntegral y)/atlasHeight,
-                                    (fromIntegral $ x + dimx)/atlasWidth, (fromIntegral $ y + dimy)/atlasHeight)
+                                    (fromIntegral x + fromIntegral dimx)/atlasWidth, (fromIntegral y + fromIntegral dimy)/atlasHeight)
                                   (atlas_texture_entries atlas) }
                     return newAtlas

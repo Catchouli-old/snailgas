@@ -24,6 +24,7 @@ library
                      , JuicyPixels
                      , vector
                      , containers
+                     , directory
 
 executable snailgas-exe
   hs-source-dirs:      app
