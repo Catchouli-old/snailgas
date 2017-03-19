@@ -121,9 +121,8 @@ findFreeSpace atlas (dimx, dimy) =
                                                             round (v0 * fromIntegral atlasHeight),
                                                             round (u1 * fromIntegral atlasWidth),
                                                             round (v1 * fromIntegral atlasHeight))
-                                -- note possible off by one error <s should be <=s but
-                                -- it leaves a gap of 1 pixel which is actually quite nice
-                                in not (bx0 > ax1 || bx1 < ax0 || by0 > by1 || bx1 < by0)
+                                    overlaps = (ax0 <= bx1+1 && bx0 <= ax1+1 && ay0 <= by1+1 && by0 <= ay1+1)
+                                in overlaps
                           in case overlap of
                                   Nothing -> True
                                   _       -> False

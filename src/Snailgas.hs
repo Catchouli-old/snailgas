@@ -45,7 +45,7 @@ gameLoop window renderer = do
   emptyAtlas <- createAtlas 1024 1024
   atlas <- foldM loadTextureA emptyAtlas ["data/tex.gif",
                                           "data/tex1.gif",
-                                          --"data/tex2.gif",
+                                          "data/tex2.gif",
                                           --"data/tex3.gif",
                                           --"data/tex4.gif",
                                           --"data/tex5.gif",
