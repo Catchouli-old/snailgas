@@ -7,6 +7,7 @@ module Snailgas.Graphics
   , createAtlas
   , drawAtlas
   , loadTextureA
+  , getTextureA
   )
 where
 
@@ -20,6 +21,7 @@ import Foreign.Ptr (nullPtr, plusPtr)
 import Data.Vector.Storable (unsafeWith)
 import Codec.Picture
 import Data.Maybe (isNothing, isJust)
+import System.FilePath (takeFileName, dropExtensions)
 import qualified Data.Map.Strict as M
 import qualified Snailgas.Graphics.GL as GL
 
@@ -32,7 +34,7 @@ data Texture = Texture { tex_id :: GLuint
 data Atlas = Atlas { atlas_tex_id :: GLuint
                    , atlas_width :: Int
                    , atlas_height :: Int
-                   , atlas_texture_entries :: M.Map String (Float, Float, Float, Float)
+                   , atlas_texture_entries :: M.Map String Texture
                    , atlas_binary_tree :: AtlasNode
                    }
 
@@ -50,11 +52,11 @@ loadTexture path = do
 
 
 createTexture :: GLuint -> (Float, Float, Float, Float) -> IO Texture
-createTexture tex_id uvs = do
-  vbuf <- GL.uploadBuffer undefined CFloat [ -1, -1, 0, 1
-                                           ,  1, -1, 1, 1
-                                           ,  1,  1, 1, 0
-                                           , -1,  1, 0, 0
+createTexture tex_id uvs@(u0, v0, u1, v1) = do
+  vbuf <- GL.uploadBuffer undefined CFloat [ -1, -1, u0, v1
+                                           ,  1, -1, u1, v1
+                                           ,  1,  1, u1, v0
+                                           , -1,  1, u0, v0
                                            ]
   return $ Texture tex_id uvs vbuf
 
@@ -71,7 +73,6 @@ initialiseGraphics = do
 
 
 -- just a test function
---atlastex = unsafePerformIO $ createTexture (fromIntegral 0) (0, 1, 1, 0)
 atlastex :: IORef Texture
 atlastex = unsafePerformIO $ newIORef undefined
 drawAtlas :: Atlas -> IO ()
@@ -79,6 +80,7 @@ drawAtlas atlas = do
   let texid = atlas_tex_id atlas
   atlastex <- readIORef atlastex
   drawTexture (atlastex { tex_id = texid })
+
 
 drawTexture :: Texture -> IO ()
 drawTexture tex = do
@@ -163,9 +165,10 @@ loadTextureA atlas filename = do
   let texid = atlas_tex_id atlas
   let atlasWidth = fromIntegral $ atlas_width atlas
   let atlasHeight = fromIntegral $ atlas_height atlas
+  let nameOnly = dropExtensions . takeFileName $ filename
 
-  if (/=Nothing) (M.lookup filename (atlas_texture_entries atlas))
-   then putStrLn ("Image with filename " ++ filename ++ " already exists in atlas") >> return atlas
+  if isJust (M.lookup nameOnly (atlas_texture_entries atlas))
+   then putStrLn ("Image with filename " ++ nameOnly ++ " already exists in atlas") >> return atlas
    else
     case eitherImgErr of
         Left err -> (putStrLn $ "Error loading image " ++ filename ++ ": " ++ err) >> return atlas
@@ -183,9 +186,17 @@ loadTextureA atlas filename = do
                        >> return atlas
                Just (x, y, _, _) -> unsafeWith (imageData imgRGBA8) $ \ptr -> do
                     glTexSubImage2D GL_TEXTURE_2D 0 (fromIntegral x) (fromIntegral y) dimx dimy GL_RGBA GL_UNSIGNED_BYTE ptr
+                    let texCoords = ((fromIntegral x)/atlasWidth,
+                                     (fromIntegral y)/atlasHeight,
+                                     (fromIntegral x + fromIntegral dimx)/atlasWidth,
+                                     (fromIntegral y + fromIntegral dimy)/atlasHeight)
+                    texture <- createTexture (atlas_tex_id atlas) texCoords
+                    let newTextureEntries = M.insert nameOnly texture (atlas_texture_entries atlas)
                     let newAtlas = atlas { atlas_binary_tree = updatedTree,
-                                           atlas_texture_entries =
-                      M.insert filename ( (fromIntegral x)/atlasWidth, (fromIntegral y)/atlasHeight,
-                                    (fromIntegral x + fromIntegral dimx)/atlasWidth, (fromIntegral y + fromIntegral dimy)/atlasHeight)
-                                  (atlas_texture_entries atlas) }
+                                           atlas_texture_entries = newTextureEntries }
                     return newAtlas
+
+
+-- | Get a texture from an atlas with a given name
+getTextureA :: Atlas -> String -> Maybe Texture
+getTextureA atlas name = M.lookup name (atlas_texture_entries atlas)

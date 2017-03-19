@@ -55,17 +55,21 @@ sortImagesBySize :: [String] -> IO [String]
 sortImagesBySize list = (map fst . reverse . sortBy (compare `on` snd)) <$> mapM (\x -> getImageSize x >>= \y -> return (x, y)) list
 
 
+-- | Get textures in directory and sort them by size
+getTexturesInDir dir = map ((dir++"/")++) <$> getDirectoryContents dir >>= sortImagesBySize
+
+
 -- | The main loop for our game
 -- The outer IO () should be evaluated once and then the resulting io action can
 -- be used to start the game loop
 gameLoop :: Window -> Renderer -> IO (IO ())
 gameLoop window renderer = do
-  tex <- loadTexture "data/tex.gif"
   --atlas <- loadTextureA "data/tex.gif" =<< createAtlas 1024 1024
   emptyAtlas <- createAtlas 2048 2048
-  mdmAssets <- map ("data/textures/"++) <$> getDirectoryContents "data/textures" >>= sortImagesBySize
-  let allAssets = ["data/tex.gif", "data/tex1.gif"] ++ mdmAssets
+  mdmAssets <- getTexturesInDir "data/textures/mdm"
   atlas <- foldM loadTextureA emptyAtlas mdmAssets
+
+  let Just tex1 = getTextureA atlas "dirt01"
 
   let loop = do
         events <- pollEvents
@@ -81,8 +85,8 @@ gameLoop window renderer = do
         glClearColor 0 0 0 1
         glClear GL_COLOR_BUFFER_BIT
 
-        --drawTexture tex
-        drawAtlas atlas
+        drawTexture tex1
+        --drawAtlas atlas
         
         -- check for gl errors
         err <- glGetError

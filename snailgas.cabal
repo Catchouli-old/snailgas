@@ -25,6 +25,7 @@ library
                      , vector
                      , containers
                      , directory
+                     , filepath
 
 executable snailgas-exe
   hs-source-dirs:      app
